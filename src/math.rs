@@ -52,6 +52,19 @@ pub fn clamp01(v: f32) -> f32 {
     }
 }
 
+/// Relative length quality comparing candidate length against reference length.
+/// Returns a value in [0, 1], smoothly peaking at 1.0 when candidate and reference
+/// lengths are proportionally consistent.
+#[inline]
+pub fn length_similarity(cand_len: f32, ref_len: f32) -> f32 {
+    if cand_len <= 0.0 || ref_len <= 0.0 {
+        return 0.0;
+    }
+    let ratio = (cand_len + 10.0) / (ref_len + 10.0);
+    let log_ratio = libm::logf(ratio);
+    clamp01(libm::expf(-1.5 * log_ratio * log_ratio))
+}
+
 /// Dot product of two equal-length slices.
 #[inline]
 pub fn dot(a: &[f32], b: &[f32]) -> f32 {

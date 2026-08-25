@@ -8,8 +8,9 @@ use dlmalloc::GlobalDlmalloc;
 #[global_allocator]
 static ALLOCATOR: GlobalDlmalloc = GlobalDlmalloc;
 
-/// Panic handler — required for `no_std`.
+/// Panic handler — required for `no_std` builds.
 /// WASM traps on `unreachable`, which surfaces as a wazero error in Go.
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()

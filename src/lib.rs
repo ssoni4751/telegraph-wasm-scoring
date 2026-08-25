@@ -47,14 +47,11 @@ const IDX_LENGTH:       usize = 3;
 const IDX_COMPOSITE:    usize = 4;
 
 // ── Composite scoring weights ─────────────────────────────────────────────────
-// Single source of truth: rank_answer, breakdown_answer, AND rank_answer_cached
-// all compute the composite the same way, from these same constants. Callers
-// on the Go side (pkg/scoring) must never reimplement this formula — see
-// runtime.go's doc comments on RankAnswer/BreakdownAnswer/RankAnswerCached.
-const W_RELEVANCE:   f32 = 0.25; // cosine(question,     miner_answer)
-const W_CORRECTNESS: f32 = 0.50; // cosine(ground_truth, miner_answer)
-const W_LEXICAL:     f32 = 0.15; // bm25(ground_truth,   miner_answer)
-const W_LENGTH:      f32 = 0.10; // sigmoid length-quality penalty
+// ── Composite scoring weights ─────────────────────────────────────────────────
+const W_RELEVANCE:   f32 = 0.15; // cosine(question,     miner_answer)
+const W_CORRECTNESS: f32 = 0.65; // semantic correctness + entity/negation penalty
+const W_LEXICAL:     f32 = 0.10; // bm25(ground_truth,   miner_answer)
+const W_LENGTH:      f32 = 0.10; // relative length quality
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Memory helpers (private)
@@ -115,9 +112,26 @@ unsafe fn signals_from_vecs(
     ma_vec: &[f32],
 ) -> (f32, f32, f32, f32) {
     let relevance   = math::cosine(q_vec, ma_vec);
-    let correctness = math::cosine(gt_vec, ma_vec);
+    let cos_val     = math::cosine(gt_vec, ma_vec);
+    
+    // Contrast sharpening: cos^1.5 widens separation between true paraphrases and near-miss distractors
+    let mut raw_correctness = libm::powf(cos_val, 1.3);
+
+    // Penalize direct negation contradictions
+    let polarity_match = bm25::has_negation(ground_truth) == bm25::has_negation(miner_answer);
+    if !polarity_match {
+        raw_correctness *= 0.35;
+    }
+
+    // Penalize numeric contradictions
+    let num_conflict = bm25::check_numeric_conflict(ground_truth, miner_answer);
+    if num_conflict {
+        raw_correctness *= 0.45;
+    }
+
+    let correctness = math::clamp01(raw_correctness);
     let lexical     = bm25::score(ground_truth, miner_answer);
-    let len_quality = math::sigmoid((miner_answer.len() as f32 - 50.0) / 20.0);
+    let len_quality = math::length_similarity(miner_answer.len() as f32, ground_truth.len() as f32);
 
     (relevance, correctness, lexical, len_quality)
 }
