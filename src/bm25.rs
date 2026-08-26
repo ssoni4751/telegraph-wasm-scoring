@@ -165,7 +165,8 @@ pub fn score(query: &str, doc: &str) -> f32 {
         return 0.0;
     }
 
-    crate::math::clamp01(raw / max_raw)
+    // Scale by 2.5 (ceiling of 1-to-1 document match) so exact word overlap reaches 1.0
+    crate::math::clamp01((raw / max_raw) * (K1 + 1.0))
 }
 
 /// Tokenise `text` into lowercase alphanumeric words, joining comma-separated numbers (e.g. 299,792 -> 299792).
@@ -207,7 +208,7 @@ mod tests {
             "the capital of france is paris",
             "the capital of france is paris",
         );
-        assert!(s > 0.35, "exact match should be > 0.35, got {s:.4}");
+        assert!(s > 0.85, "exact match should be > 0.85, got {s:.4}");
     }
 
     #[test]

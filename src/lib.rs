@@ -47,10 +47,9 @@ const IDX_LENGTH:       usize = 3;
 const IDX_COMPOSITE:    usize = 4;
 
 // ── Composite scoring weights ─────────────────────────────────────────────────
-// ── Composite scoring weights ─────────────────────────────────────────────────
 const W_RELEVANCE:   f32 = 0.15; // cosine(question,     miner_answer)
-const W_CORRECTNESS: f32 = 0.65; // semantic correctness + entity/negation penalty
-const W_LEXICAL:     f32 = 0.10; // bm25(ground_truth,   miner_answer)
+const W_CORRECTNESS: f32 = 0.70; // semantic correctness + entity/negation penalty
+const W_LEXICAL:     f32 = 0.05; // bm25(ground_truth,   miner_answer)
 const W_LENGTH:      f32 = 0.10; // relative length quality
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,13 +110,16 @@ unsafe fn signals_from_vecs(
     miner_answer: &str,
     ma_vec: &[f32],
 ) -> (f32, f32, f32, f32) {
-    let is_exact_self = ground_truth.trim() == miner_answer.trim();
-    if is_exact_self {
-        return (1.0, 1.0, 1.0, 1.0);
-    }
+    // Relative question alignment: measures MA's answer relevance relative to the reference GT
+    let q_gt_sim = math::cosine(q_vec, gt_vec);
+    let q_ma_sim = math::cosine(q_vec, ma_vec);
+    let relevance = if q_gt_sim > 0.01 {
+        math::clamp01(q_ma_sim / q_gt_sim)
+    } else {
+        math::clamp01(q_ma_sim)
+    };
 
-    let relevance   = math::cosine(q_vec, ma_vec);
-    let cos_val     = math::cosine(gt_vec, ma_vec);
+    let cos_val = math::cosine(gt_vec, ma_vec);
     
     // Contrast sharpening: cos^1.3 widens separation between true paraphrases and near-miss distractors
     let mut raw_correctness = libm::powf(cos_val, 1.3);
