@@ -111,10 +111,15 @@ unsafe fn signals_from_vecs(
     miner_answer: &str,
     ma_vec: &[f32],
 ) -> (f32, f32, f32, f32) {
+    let is_exact_self = ground_truth.trim() == miner_answer.trim();
+    if is_exact_self {
+        return (1.0, 1.0, 1.0, 1.0);
+    }
+
     let relevance   = math::cosine(q_vec, ma_vec);
     let cos_val     = math::cosine(gt_vec, ma_vec);
     
-    // Contrast sharpening: cos^1.5 widens separation between true paraphrases and near-miss distractors
+    // Contrast sharpening: cos^1.3 widens separation between true paraphrases and near-miss distractors
     let mut raw_correctness = libm::powf(cos_val, 1.3);
 
     // Penalize direct negation contradictions
