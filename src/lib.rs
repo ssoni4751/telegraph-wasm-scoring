@@ -114,26 +114,26 @@ unsafe fn signals_from_vecs(
     let q_gt_sim = math::cosine(q_vec, gt_vec);
     let q_ma_sim = math::cosine(q_vec, ma_vec);
     let relevance = if q_gt_sim > 0.01 {
-        libm::powf(math::clamp01(q_ma_sim / q_gt_sim), 1.5)
+        libm::powf(math::clamp01(q_ma_sim / q_gt_sim), 2.0)
     } else {
         math::clamp01(q_ma_sim)
     };
 
     let cos_val = math::cosine(gt_vec, ma_vec);
     
-    // High-contrast power sharpening: cos^2.5 heavily depresses distractors while preserving high-fidelity answers
-    let mut raw_correctness = libm::powf(cos_val, 2.5);
+    // High-contrast power sharpening: cos^3.5 aggressively suppresses distractors while keeping top answers high
+    let mut raw_correctness = libm::powf(cos_val, 3.5);
 
     // Penalize direct negation contradictions
     let polarity_match = bm25::has_negation(ground_truth) == bm25::has_negation(miner_answer);
     if !polarity_match {
-        raw_correctness *= 0.20;
+        raw_correctness *= 0.15;
     }
 
     // Penalize numeric contradictions
     let num_conflict = bm25::check_numeric_conflict(ground_truth, miner_answer);
     if num_conflict {
-        raw_correctness *= 0.25;
+        raw_correctness *= 0.20;
     }
 
     let correctness = math::clamp01(raw_correctness);
