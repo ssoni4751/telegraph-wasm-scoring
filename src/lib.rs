@@ -145,10 +145,9 @@ unsafe fn signals_from_vecs(
 
 #[inline]
 fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -> f32 {
-    let score = W_RELEVANCE   * relevance
-              + W_CORRECTNESS * correctness
-              + W_LEXICAL     * lexical
-              + W_LENGTH      * len_quality;
+    let aux = W_RELEVANCE * relevance + W_LEXICAL * lexical + W_LENGTH * len_quality;
+    // Modulate auxiliary signals by correctness so incorrect answers cannot coast on length or question overlap
+    let score = W_CORRECTNESS * correctness + aux * libm::sqrtf(correctness);
     math::clamp01(score)
 }
 
