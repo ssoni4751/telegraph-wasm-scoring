@@ -113,6 +113,18 @@ pub fn check_numeric_conflict(gt: &str, ma: &str) -> bool {
     false
 }
 
+const FIRST_WORD_IGNORES: &[&str] = &[
+    "the", "a", "an", "in", "on", "at", "for", "with", "by", "from",
+    "to", "it", "this", "that", "these", "those", "is", "are", "was",
+    "were", "be", "what", "where", "when", "who", "why", "how", "all",
+    "some", "many", "most", "each", "every", "if", "as", "and", "or", "but"
+];
+
+#[inline]
+fn is_sentence_start_ignore(term: &str) -> bool {
+    FIRST_WORD_IGNORES.iter().any(|&sw| sw == term)
+}
+
 /// Check if candidate introduces conflicting proper nouns / named entities compared to reference.
 pub fn check_entity_conflict(gt: &str, ma: &str) -> bool {
     fn get_entities(text: &str) -> Vec<String> {
@@ -124,11 +136,16 @@ pub fn check_entity_conflict(gt: &str, ma: &str) -> bool {
                 let first = clean.chars().next().unwrap();
                 let is_first_word = i == 0 || words[i - 1].ends_with('.') || words[i - 1].ends_with('!') || words[i - 1].ends_with('?');
                 let all_upper = clean.chars().all(|c| c.is_uppercase() || c.is_ascii_digit());
-                if (first.is_uppercase() && !is_first_word) || all_upper {
-                    let lower = clean.to_lowercase();
-                    if !is_stopword(&lower) && !ents.contains(&lower) {
-                        ents.push(lower);
-                    }
+                let lower = clean.to_lowercase();
+                
+                let should_include = if is_first_word {
+                    first.is_uppercase() && !is_sentence_start_ignore(&lower)
+                } else {
+                    first.is_uppercase() || all_upper
+                };
+
+                if should_include && !is_stopword(&lower) && !ents.contains(&lower) {
+                    ents.push(lower);
                 }
             }
         }
@@ -139,9 +156,10 @@ pub fn check_entity_conflict(gt: &str, ma: &str) -> bool {
     let ma_ents = get_entities(ma);
 
     if !gt_ents.is_empty() && !ma_ents.is_empty() {
-        let has_novel_ent = ma_ents.iter().any(|m| !gt_ents.contains(m));
-        let missing_gt_ent = gt_ents.iter().any(|g| !ma_ents.contains(g));
-        if has_novel_ent && missing_gt_ent {
+        let has_missing_gt = gt_ents.iter().any(|g| !ma_ents.iter().any(|m| m.contains(g) || g.contains(m) || m.starts_with(&g[..3.min(g.len())]) || g.starts_with(&m[..3.min(m.len())])));
+        let has_novel_ent  = ma_ents.iter().any(|m| !gt_ents.iter().any(|g| g.contains(m) || m.contains(g) || g.starts_with(&m[..3.min(m.len())]) || m.starts_with(&g[..3.min(g.len())])));
+        
+        if has_missing_gt && has_novel_ent {
             return true;
         }
     }
