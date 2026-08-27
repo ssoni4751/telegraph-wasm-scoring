@@ -121,11 +121,11 @@ unsafe fn signals_from_vecs(
 
     let cos_val = math::cosine(gt_vec, ma_vec);
     
-    // Smooth contrast curve centered at 0.65 with steepness 14.0
+    // High-separation contrast curve (k=18.0, x0=0.62)
     let mut raw_correctness = if cos_val >= 0.999 {
         1.0
     } else {
-        math::sigmoid_contrast(cos_val, 0.65, 14.0)
+        math::sigmoid_contrast(cos_val, 0.62, 18.0)
     };
 
     // Strict penalization for direct negation contradictions
@@ -155,9 +155,9 @@ unsafe fn signals_from_vecs(
 
 #[inline]
 fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -> f32 {
-    let aux = 0.75 + 0.15 * relevance + 0.05 * lexical + 0.05 * len_quality;
-    // Cubic power gating: exponentially expands the margin between good and distractor answers
-    let score = libm::powf(correctness, 2.5) * aux;
+    let aux = 0.85 + 0.10 * relevance + 0.05 * len_quality;
+    // Multiplicative quadratic gating with high base to expand separation
+    let score = (correctness * correctness) * aux;
     math::clamp01(score)
 }
 
