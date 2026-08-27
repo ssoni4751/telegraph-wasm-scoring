@@ -138,6 +138,12 @@ unsafe fn signals_from_vecs(
         raw_correctness *= 0.01;
     }
 
+    // Strict penalization for proper noun / entity contradictions on distractors
+    let ent_conflict = bm25::check_entity_conflict(ground_truth, miner_answer);
+    if ent_conflict && cos_val < 0.88 {
+        raw_correctness *= 0.01;
+    }
+
     let correctness = math::clamp01(raw_correctness);
     let lexical     = bm25::score(ground_truth, miner_answer);
     let len_quality = math::length_similarity(miner_answer.len() as f32, ground_truth.len() as f32);

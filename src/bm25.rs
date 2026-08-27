@@ -135,13 +135,14 @@ pub fn check_entity_conflict(gt: &str, ma: &str) -> bool {
             if clean.len() >= 2 {
                 let first = clean.chars().next().unwrap();
                 let is_first_word = i == 0 || words[i - 1].ends_with('.') || words[i - 1].ends_with('!') || words[i - 1].ends_with('?');
-                let all_upper = clean.chars().all(|c| c.is_uppercase() || c.is_ascii_digit());
+                let has_alpha = clean.chars().any(|c| c.is_alphabetic());
+                let all_upper = has_alpha && clean.chars().all(|c| c.is_uppercase() || c.is_ascii_digit());
                 let lower = clean.to_lowercase();
                 
                 let should_include = if is_first_word {
-                    first.is_uppercase() && !is_sentence_start_ignore(&lower)
+                    first.is_uppercase() && has_alpha && !is_sentence_start_ignore(&lower)
                 } else {
-                    first.is_uppercase() || all_upper
+                    (first.is_uppercase() && has_alpha) || all_upper
                 };
 
                 if should_include && !is_stopword(&lower) && !ents.contains(&lower) {
@@ -154,10 +155,12 @@ pub fn check_entity_conflict(gt: &str, ma: &str) -> bool {
 
     let gt_ents = get_entities(gt);
     let ma_ents = get_entities(ma);
+    let gt_lower = gt.to_lowercase();
+    let ma_lower = ma.to_lowercase();
 
     if !gt_ents.is_empty() && !ma_ents.is_empty() {
-        let has_missing_gt = gt_ents.iter().any(|g| !ma_ents.iter().any(|m| m.contains(g) || g.contains(m) || m.starts_with(&g[..3.min(g.len())]) || g.starts_with(&m[..3.min(m.len())])));
-        let has_novel_ent  = ma_ents.iter().any(|m| !gt_ents.iter().any(|g| g.contains(m) || m.contains(g) || g.starts_with(&m[..3.min(m.len())]) || m.starts_with(&g[..3.min(g.len())])));
+        let has_missing_gt = gt_ents.iter().any(|g| !ma_lower.contains(g) && !ma_lower.contains(&g[..3.min(g.len())]));
+        let has_novel_ent  = ma_ents.iter().any(|m| !gt_lower.contains(m) && !gt_lower.contains(&m[..3.min(m.len())]));
         
         if has_missing_gt && has_novel_ent {
             return true;
@@ -272,6 +275,24 @@ mod tests {
             "the capital of france is paris",
         );
         assert!(s > 0.85, "exact match should be > 0.85, got {s:.4}");
+    }
+
+    #[test]
+    fn test_nums_match_speed_of_light() {
+        assert!(nums_match("299792", "300000"));
+        assert!(!nums_match("299792", "1000"));
+        assert!(!check_numeric_conflict(
+            "Light travels at approximately 299,792 kilometers per second in a vacuum.",
+            "In vacuum, the speed of light is about 300,000 km/s."
+        ));
+        assert!(check_numeric_conflict(
+            "Light travels at approximately 299,792 kilometers per second in a vacuum.",
+            "Light travels at approximately 1,000 kilometers per second in a vacuum."
+        ));
+        assert!(!check_entity_conflict(
+            "Light travels at approximately 299,792 kilometers per second in a vacuum.",
+            "In vacuum, the speed of light is about 300,000 km/s."
+        ));
     }
 
     #[test]
