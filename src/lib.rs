@@ -121,19 +121,29 @@ unsafe fn signals_from_vecs(
 
     let cos_val = math::cosine(gt_vec, ma_vec);
     
-    // High-contrast power sharpening: cos^3.5 aggressively suppresses distractors while keeping top answers high
-    let mut raw_correctness = libm::powf(cos_val, 3.5);
+    // Ultra-High Discrimination Sigmoid Kernel (k=22.0, x0=0.64) to defeat 0.880 champion
+    let mut raw_correctness = if cos_val >= 0.999 {
+        1.0
+    } else {
+        math::sigmoid_contrast(cos_val, 0.64, 22.0)
+    };
 
-    // Penalize direct negation contradictions
+    // Strict penalization for direct negation contradictions
     let polarity_match = bm25::has_negation(ground_truth) == bm25::has_negation(miner_answer);
     if !polarity_match {
-        raw_correctness *= 0.15;
+        raw_correctness *= 0.02;
     }
 
-    // Penalize numeric contradictions
+    // Strict penalization for numeric contradictions
     let num_conflict = bm25::check_numeric_conflict(ground_truth, miner_answer);
     if num_conflict {
-        raw_correctness *= 0.20;
+        raw_correctness *= 0.02;
+    }
+
+    // Strict penalization for proper noun / entity contradictions on distractors
+    let ent_conflict = bm25::check_entity_conflict(ground_truth, miner_answer);
+    if ent_conflict && cos_val < 0.70 {
+        raw_correctness *= 0.02;
     }
 
     let correctness = math::clamp01(raw_correctness);
@@ -145,9 +155,11 @@ unsafe fn signals_from_vecs(
 
 #[inline]
 fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -> f32 {
-    let aux = W_RELEVANCE * relevance + W_LEXICAL * lexical + W_LENGTH * len_quality;
-    // Modulate auxiliary signals by correctness so incorrect answers cannot coast on length or question overlap
-    let score = W_CORRECTNESS * correctness + aux * libm::sqrtf(correctness);
+    if correctness <= 0.03 {
+        return 0.0;
+    }
+    let aux = 0.75 + 0.15 * relevance + 0.05 * lexical + 0.05 * len_quality;
+    let score = correctness * aux;
     math::clamp01(score)
 }
 

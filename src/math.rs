@@ -53,16 +53,28 @@ pub fn clamp01(v: f32) -> f32 {
 }
 
 /// Relative length quality comparing candidate length against reference length.
-/// Returns a value in [0, 1], smoothly peaking at 1.0 when candidate and reference
-/// lengths are proportionally consistent.
+/// Uses asymmetric Gaussian: penalizes verbose padding slightly more than concise answers.
 #[inline]
 pub fn length_similarity(cand_len: f32, ref_len: f32) -> f32 {
     if cand_len <= 0.0 || ref_len <= 0.0 {
         return 0.0;
     }
-    let ratio = (cand_len + 10.0) / (ref_len + 10.0);
-    let log_ratio = libm::logf(ratio);
-    clamp01(libm::expf(-1.5 * log_ratio * log_ratio))
+    let log_ratio = libm::logf(cand_len / ref_len);
+    let sigma = if log_ratio > 0.0 { 0.42 } else { 0.55 };
+    let quality = libm::expf(-0.5 * (log_ratio * log_ratio) / (sigma * sigma));
+    clamp01(quality)
+}
+
+/// Temperature-scaled sigmoid contrast curve for V1.5.
+/// Maps similarity scores across an S-curve to maximize separation margin.
+#[inline]
+pub fn sigmoid_contrast(cos: f32, center: f32, steepness: f32) -> f32 {
+    if cos >= 0.999 {
+        return 1.0;
+    }
+    let diff = cos - center;
+    let s = 1.0 / (1.0 + libm::expf(-steepness * diff));
+    clamp01(s)
 }
 
 /// Dot product of two equal-length slices.

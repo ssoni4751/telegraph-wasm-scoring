@@ -77,26 +77,71 @@ fn parse_f32(s: &str) -> Result<f32, ()> {
     Ok(val)
 }
 
+/// Extract all numeric substrings from text (e.g. "100°C" -> ["100"], "299,792 km/s" -> ["299792"])
+fn extract_numbers(text: &str) -> Vec<String> {
+    let mut nums = Vec::new();
+    let mut curr = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    for i in 0..chars.len() {
+        let c = chars[i];
+        if c.is_ascii_digit() {
+            curr.push(c);
+        } else if c == ',' && i > 0 && i + 1 < chars.len() && chars[i - 1].is_ascii_digit() && chars[i + 1].is_ascii_digit() {
+            continue;
+        } else if !curr.is_empty() {
+            nums.push(core::mem::take(&mut curr));
+        }
+    }
+    if !curr.is_empty() {
+        nums.push(curr);
+    }
+    nums
+}
+
 /// Check if candidate introduces conflicting numbers compared to reference.
 pub fn check_numeric_conflict(gt: &str, ma: &str) -> bool {
-    let gt_terms = tokenise(gt);
-    let ma_terms = tokenise(ma);
-
-    let gt_nums: Vec<&str> = gt_terms
-        .iter()
-        .filter(|t| t.chars().all(|c| c.is_ascii_digit()))
-        .map(|s| s.as_str())
-        .collect();
-    let ma_nums: Vec<&str> = ma_terms
-        .iter()
-        .filter(|t| t.chars().all(|c| c.is_ascii_digit()))
-        .map(|s| s.as_str())
-        .collect();
+    let gt_nums = extract_numbers(gt);
+    let ma_nums = extract_numbers(ma);
 
     if !gt_nums.is_empty() && !ma_nums.is_empty() {
         let has_novel_num = ma_nums.iter().any(|m| !gt_nums.iter().any(|g| nums_match(g, m)));
         let missing_gt_num = gt_nums.iter().any(|g| !ma_nums.iter().any(|m| nums_match(g, m)));
         if has_novel_num && missing_gt_num {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if candidate introduces conflicting proper nouns / named entities compared to reference.
+pub fn check_entity_conflict(gt: &str, ma: &str) -> bool {
+    fn get_entities(text: &str) -> Vec<String> {
+        let mut ents = Vec::new();
+        let words: Vec<&str> = text.split_whitespace().collect();
+        for (i, &w) in words.iter().enumerate() {
+            let clean: String = w.chars().filter(|c| c.is_alphanumeric()).collect();
+            if clean.len() >= 2 {
+                let first = clean.chars().next().unwrap();
+                let is_first_word = i == 0 || words[i - 1].ends_with('.') || words[i - 1].ends_with('!') || words[i - 1].ends_with('?');
+                let all_upper = clean.chars().all(|c| c.is_uppercase() || c.is_ascii_digit());
+                if (first.is_uppercase() && !is_first_word) || all_upper {
+                    let lower = clean.to_lowercase();
+                    if !is_stopword(&lower) && !ents.contains(&lower) {
+                        ents.push(lower);
+                    }
+                }
+            }
+        }
+        ents
+    }
+
+    let gt_ents = get_entities(gt);
+    let ma_ents = get_entities(ma);
+
+    if !gt_ents.is_empty() && !ma_ents.is_empty() {
+        let has_novel_ent = ma_ents.iter().any(|m| !gt_ents.contains(m));
+        let missing_gt_ent = gt_ents.iter().any(|g| !ma_ents.contains(g));
+        if has_novel_ent && missing_gt_ent {
             return true;
         }
     }
