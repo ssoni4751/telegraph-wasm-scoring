@@ -46,12 +46,6 @@ const IDX_LEXICAL:      usize = 2;
 const IDX_LENGTH:       usize = 3;
 const IDX_COMPOSITE:    usize = 4;
 
-// ── Composite scoring weights ─────────────────────────────────────────────────
-const W_RELEVANCE:   f32 = 0.15; // cosine(question,     miner_answer)
-const W_CORRECTNESS: f32 = 0.70; // semantic correctness + entity/negation penalty
-const W_LEXICAL:     f32 = 0.05; // bm25(ground_truth,   miner_answer)
-const W_LENGTH:      f32 = 0.10; // relative length quality
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Memory helpers (private)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,7 +152,7 @@ unsafe fn signals_from_vecs(
 
 #[inline]
 fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -> f32 {
-    let aux = 0.88 + 0.08 * relevance + 0.04 * len_quality;
+    let aux = 0.85 + 0.08 * relevance + 0.03 * lexical + 0.04 * len_quality;
     // Multiplicative quadratic gating to drive distractors to 0.00 while keeping good answers at 0.95+
     let score = (correctness * correctness) * aux;
     math::clamp01(score)
