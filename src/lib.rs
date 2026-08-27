@@ -140,7 +140,7 @@ unsafe fn signals_from_vecs(
 
     // Strict penalization for proper noun / entity contradictions on distractors
     let ent_conflict = bm25::check_entity_conflict(ground_truth, miner_answer);
-    if ent_conflict && cos_val < 0.72 {
+    if ent_conflict && cos_val < 0.88 {
         raw_correctness *= 0.001;
     }
 
