@@ -121,11 +121,11 @@ unsafe fn signals_from_vecs(
 
     let cos_val = math::cosine(gt_vec, ma_vec);
     
-    // Ultra-High Discrimination Sigmoid Kernel (k=22.0, x0=0.64) to defeat 0.880 champion
+    // Smooth contrast curve centered at 0.65 with steepness 14.0
     let mut raw_correctness = if cos_val >= 0.999 {
         1.0
     } else {
-        math::sigmoid_contrast(cos_val, 0.64, 22.0)
+        math::sigmoid_contrast(cos_val, 0.65, 14.0)
     };
 
     // Strict penalization for direct negation contradictions
@@ -142,7 +142,7 @@ unsafe fn signals_from_vecs(
 
     // Strict penalization for proper noun / entity contradictions on distractors
     let ent_conflict = bm25::check_entity_conflict(ground_truth, miner_answer);
-    if ent_conflict && cos_val < 0.70 {
+    if ent_conflict && cos_val < 0.75 {
         raw_correctness *= 0.02;
     }
 
@@ -155,11 +155,9 @@ unsafe fn signals_from_vecs(
 
 #[inline]
 fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -> f32 {
-    if correctness <= 0.03 {
-        return 0.0;
-    }
     let aux = 0.75 + 0.15 * relevance + 0.05 * lexical + 0.05 * len_quality;
-    let score = correctness * aux;
+    // Cubic power gating: exponentially expands the margin between good and distractor answers
+    let score = libm::powf(correctness, 2.5) * aux;
     math::clamp01(score)
 }
 
