@@ -121,27 +121,21 @@ unsafe fn signals_from_vecs(
     }
 
     // Boost semantic similarity using question alignment
-    let effective_sim = math::clamp01(cos_val + 0.03 * relevance);
+    let effective_sim = math::clamp01(cos_val + 0.04 * relevance);
 
-    // V2.0 Dual-Zone Asymmetric Sigmoid Kernel (k=24.0, x0=0.66)
-    let mut raw_correctness = math::sigmoid_contrast(effective_sim, 0.66, 24.0);
+    // Sigmoid Decision Boundary centered at 0.68 with steepness 20.0
+    let mut raw_correctness = math::sigmoid_contrast(effective_sim, 0.68, 20.0);
 
     // Strict penalization for direct negation contradictions
     let polarity_match = bm25::has_negation(ground_truth) == bm25::has_negation(miner_answer);
     if !polarity_match {
-        raw_correctness *= 0.001;
+        raw_correctness *= 0.01;
     }
 
     // Strict penalization for numeric contradictions
     let num_conflict = bm25::check_numeric_conflict(ground_truth, miner_answer);
     if num_conflict {
-        raw_correctness *= 0.001;
-    }
-
-    // Strict penalization for proper noun / entity contradictions on distractors
-    let ent_conflict = bm25::check_entity_conflict(ground_truth, miner_answer);
-    if ent_conflict && cos_val < 0.88 {
-        raw_correctness *= 0.001;
+        raw_correctness *= 0.01;
     }
 
     let correctness = math::clamp01(raw_correctness);
@@ -153,13 +147,7 @@ unsafe fn signals_from_vecs(
 
 #[inline]
 fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -> f32 {
-    if correctness >= 0.999 {
-        return 1.0;
-    }
-    if correctness <= 0.02 {
-        return 0.0;
-    }
-    let aux = 0.86 + 0.08 * relevance + 0.03 * lexical + 0.03 * len_quality;
+    let aux = 0.85 + 0.08 * relevance + 0.03 * lexical + 0.04 * len_quality;
     // Multiplicative quadratic gating to drive distractors to 0.00 while keeping good answers at 0.95+
     let score = (correctness * correctness) * aux;
     math::clamp01(score)
