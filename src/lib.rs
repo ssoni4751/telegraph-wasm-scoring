@@ -114,12 +114,13 @@ unsafe fn signals_from_vecs(
 
     let raw_corr = math::cosine(gt_vec, ma_vec);
     
-    // Robust invariant contradiction modifiers (100% false-positive free)
+    // Robust invariant contradiction modifiers (Directional polarity, quantity, relational, temporal)
     let mod_pol   = if bm25::has_polarity_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
     let mod_quant = if bm25::check_quantity_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
     let mod_rel   = if bm25::check_predicate_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
+    let mod_temp  = if bm25::check_temporal_year_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
 
-    let correctness = math::clamp01(raw_corr * mod_pol * mod_quant * mod_rel);
+    let correctness = math::clamp01(raw_corr * mod_pol * mod_quant * mod_rel * mod_temp);
     let lexical     = bm25::score(ground_truth, miner_answer);
     let len_quality = math::length_similarity(miner_answer.len() as f32, ground_truth.len() as f32);
 

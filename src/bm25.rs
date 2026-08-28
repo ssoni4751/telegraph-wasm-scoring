@@ -67,6 +67,15 @@ const DIRECTIONAL_PAIRS: &[(&str, &str)] = &[
     ("grew", "declined"),
     ("more", "less"),
     ("up", "down"),
+    // Chronological and temporal directional pairs
+    ("before", "after"),
+    ("preceded", "succeeded"),
+    ("preceding", "succeeding"),
+    ("prior", "following"),
+    ("earlier", "later"),
+    ("bce", "ce"),
+    ("bc", "ad"),
+    ("ancient", "modern"),
 ];
 
 /// Check if text contains explicit negation tokens or directional polarity conflicts.
@@ -77,14 +86,64 @@ pub fn has_polarity_conflict(gt: &str, ma: &str) -> bool {
         return true;
     }
 
-    let gt_lower = gt.to_lowercase();
-    let ma_lower = ma.to_lowercase();
+    let gt_terms = tokenise(gt);
+    let ma_terms = tokenise(ma);
     for &(w1, w2) in DIRECTIONAL_PAIRS {
-        if (gt_lower.contains(w1) && ma_lower.contains(w2)) || (gt_lower.contains(w2) && ma_lower.contains(w1)) {
+        let gt_has_w1 = gt_terms.iter().any(|t| t == w1);
+        let gt_has_w2 = gt_terms.iter().any(|t| t == w2);
+        let ma_has_w1 = ma_terms.iter().any(|t| t == w1);
+        let ma_has_w2 = ma_terms.iter().any(|t| t == w2);
+
+        if (gt_has_w1 && ma_has_w2) || (gt_has_w2 && ma_has_w1) {
             return true;
         }
     }
 
+    false
+}
+
+/// Helper struct for parsed historical calendar years and eras.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct YearInfo {
+    pub year: i32,
+    pub is_bce: bool,
+}
+
+/// Extract all historical calendar years (1000..=2099 or explicit BCE numbers) from text.
+pub fn extract_all_years(text: &str) -> Vec<YearInfo> {
+    let lower = text.to_lowercase();
+    let is_bce = lower.contains("bce") || lower.contains("bc") || lower.contains("b.c.");
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    let mut years = Vec::new();
+
+    for &w in &words {
+        let clean: String = w.chars().filter(|c| c.is_ascii_digit()).collect();
+        if !clean.is_empty() {
+            if let Ok(num) = clean.parse::<i32>() {
+                if (num >= 1000 && num <= 2099) || (is_bce && num > 0 && num < 10000) {
+                    let y = YearInfo { year: num, is_bce };
+                    if !years.contains(&y) {
+                        years.push(y);
+                    }
+                }
+            }
+        }
+    }
+    years
+}
+
+/// Check if candidate asserts an explicit historical year that conflicts with reference.
+pub fn check_temporal_year_conflict(gt: &str, ma: &str) -> bool {
+    let gt_years = extract_all_years(gt);
+    let ma_years = extract_all_years(ma);
+
+    if !gt_years.is_empty() && !ma_years.is_empty() {
+        for m in &ma_years {
+            if !gt_years.iter().any(|g| g.year == m.year && g.is_bce == m.is_bce) {
+                return true; // Candidate asserted a contradictory calendar year!
+            }
+        }
+    }
     false
 }
 
