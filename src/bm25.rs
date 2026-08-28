@@ -108,61 +108,158 @@ fn nums_match(a: &str, b: &str) -> bool {
     false
 }
 
-/// Lightweight no_std ascii float parser supporting decimals.
+/// Lightweight no_std ascii float parser supporting decimals, signs, and scientific notation (e.g. 2.99792e5).
 fn parse_f32(s: &str) -> Result<f32, ()> {
+    if s.is_empty() {
+        return Err(());
+    }
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut negative = false;
+    if bytes[0] == b'-' {
+        negative = true;
+        i += 1;
+    } else if bytes[0] == b'+' {
+        i += 1;
+    }
+
     let mut val = 0.0f32;
     let mut decimal = false;
     let mut divisor = 1.0f32;
-    for &b in s.as_bytes() {
+    let mut exp_mode = false;
+    let mut exp_val = 0i32;
+    let mut exp_negative = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
         if b.is_ascii_digit() {
-            if decimal {
+            if exp_mode {
+                exp_val = exp_val * 10 + (b - b'0') as i32;
+            } else if decimal {
                 divisor *= 10.0;
                 val += ((b - b'0') as f32) / divisor;
             } else {
                 val = val * 10.0 + ((b - b'0') as f32);
             }
-        } else if b == b'.' && !decimal {
+        } else if (b == b'e' || b == b'E') && !exp_mode {
+            exp_mode = true;
+            if i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+                exp_negative = true;
+                i += 1;
+            } else if i + 1 < bytes.len() && bytes[i + 1] == b'+' {
+                i += 1;
+            }
+        } else if b == b'.' && !decimal && !exp_mode {
             decimal = true;
+        } else if b == b',' {
+            // Ignore thousands separator
         } else {
-            return Err(());
+            break;
         }
+        i += 1;
+    }
+
+    if negative {
+        val = -val;
+    }
+    if exp_mode {
+        let power = if exp_negative { -exp_val } else { exp_val };
+        val *= libm::powf(10.0, power as f32);
     }
     Ok(val)
 }
 
-/// Extract all numeric substrings from text (e.g. "100°C" -> ["100"], "29.8 km/s" -> ["29.8"], "299,792 km/s" -> ["299792"])
-fn extract_numbers(text: &str) -> Vec<String> {
-    let mut nums = Vec::new();
-    let mut curr = String::new();
-    let chars: Vec<char> = text.chars().collect();
-    for i in 0..chars.len() {
-        let c = chars[i];
-        if c.is_ascii_digit() {
-            curr.push(c);
-        } else if c == '.' && i > 0 && i + 1 < chars.len() && chars[i - 1].is_ascii_digit() && chars[i + 1].is_ascii_digit() {
-            curr.push(c);
-        } else if c == ',' && i > 0 && i + 1 < chars.len() && chars[i - 1].is_ascii_digit() && chars[i + 1].is_ascii_digit() {
-            continue;
-        } else if !curr.is_empty() {
-            nums.push(core::mem::take(&mut curr));
-        }
-    }
-    if !curr.is_empty() {
-        nums.push(curr);
-    }
-    nums
+/// Helper struct for parsed physical quantities.
+#[derive(Clone, Copy, Debug)]
+pub struct Quantity {
+    pub num: f32,
+    pub is_discrete: bool,
+    pub unit_code: u8, // 0: none, 1: km/s, 2: m/s, 3: celsius, 4: fahrenheit, 5: days, 6: percent
 }
 
-/// Check if candidate introduces conflicting numbers compared to reference.
-pub fn check_numeric_conflict(gt: &str, ma: &str) -> bool {
-    let gt_nums = extract_numbers(gt);
-    let ma_nums = extract_numbers(ma);
+/// Extract all normalized quantities from text (supporting scale words e.g. "0.3 million", decimals, units).
+pub fn extract_all_quantities(text: &str) -> Vec<Quantity> {
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    let mut quantities = Vec::new();
 
-    if !gt_nums.is_empty() && !ma_nums.is_empty() {
-        let has_novel_num = ma_nums.iter().any(|m| !gt_nums.iter().any(|g| nums_match(g, m)));
-        let missing_gt_num = gt_nums.iter().any(|g| !ma_nums.iter().any(|m| nums_match(g, m)));
-        if has_novel_num && missing_gt_num {
-            return true;
+    let mut global_unit = 0u8;
+    if lower.contains("km/s") || lower.contains("kilometers per second") || lower.contains("km per second") {
+        global_unit = 1;
+    } else if lower.contains("m/s") || lower.contains("meters per second") || lower.contains("m per second") {
+        global_unit = 2;
+    } else if lower.contains("celsius") || lower.contains("°c") {
+        global_unit = 3;
+    } else if lower.contains("fahrenheit") || lower.contains("°f") {
+        global_unit = 4;
+    } else if lower.contains("days") || lower.contains("day") {
+        global_unit = 5;
+    } else if lower.contains("percent") || lower.contains("%") {
+        global_unit = 6;
+    }
+
+    for (i, &w) in words.iter().enumerate() {
+        let clean: String = w.chars().filter(|c| c.is_ascii_digit() || *c == '.' || *c == 'e' || *c == 'E' || *c == '+' || *c == '-').collect();
+        if let Ok(mut num) = parse_f32(&clean) {
+            let has_decimal = clean.contains('.') || clean.contains('e') || clean.contains('E');
+            
+            // Check next word for magnitude scale words
+            if i + 1 < words.len() {
+                let next = words[i + 1];
+                if next.starts_with("million") {
+                    num *= 1_000_000.0;
+                } else if next.starts_with("billion") {
+                    num *= 1_000_000_000.0;
+                } else if next.starts_with("thousand") || next == "k" {
+                    num *= 1_000.0;
+                }
+            }
+
+            let is_discrete = !has_decimal && num < 1000.0 && global_unit == 5; // e.g. discrete calendar days
+            quantities.push(Quantity { num, is_discrete, unit_code: global_unit });
+        }
+    }
+    quantities
+}
+
+/// Check if candidate introduces conflicting numbers or unit mismatches compared to reference.
+pub fn check_quantity_conflict(gt: &str, ma: &str) -> bool {
+    let q_gt = extract_all_quantities(gt);
+    let q_ma = extract_all_quantities(ma);
+
+    if !q_gt.is_empty() && !q_ma.is_empty() {
+        for g in &q_gt {
+            let mut matched = false;
+            for m in &q_ma {
+                let mut v_ma = m.num;
+                // Unit conversion km/s <-> m/s
+                if g.unit_code == 1 && m.unit_code == 2 {
+                    v_ma /= 1000.0;
+                } else if g.unit_code == 2 && m.unit_code == 1 {
+                    v_ma *= 1000.0;
+                } else if g.unit_code != 0 && m.unit_code != 0 && g.unit_code != m.unit_code {
+                    return true; // Dimensional unit mismatch
+                }
+
+                if g.is_discrete {
+                    if (g.num - v_ma).abs() < 0.001 {
+                        matched = true;
+                        break;
+                    }
+                } else if g.num > 0.0 && v_ma > 0.0 {
+                    let ratio = v_ma / g.num;
+                    if ratio >= 0.95 && ratio <= 1.05 {
+                        matched = true;
+                        break;
+                    }
+                } else if (g.num - v_ma).abs() < 0.001 {
+                    matched = true;
+                    break;
+                }
+            }
+            if !matched {
+                return true;
+            }
         }
     }
     false
@@ -179,26 +276,35 @@ const KNOWN_SLOT_DOMAINS: &[&[&str]] = &[
     &["mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto"],
     // Chemical elements
     &["hydrogen", "helium", "oxygen", "nitrogen", "carbon", "gold", "silver", "iron", "copper", "lead", "uranium"],
+    // Primary Colors
+    &["red", "green", "blue", "yellow", "cyan", "magenta"],
     // Superlatives / Oceans / Deserts / Minerals
     &["pacific", "atlantic", "indian", "arctic", "sahara", "antarctic", "gobi", "diamond", "corundum", "topaz", "quartz", "talc"]
 ];
 
-/// Check if candidate substitutes an answer-bearing domain slot with a conflicting slot value.
-pub fn check_slot_value_conflict(gt: &str, ma: &str) -> bool {
+/// Compute fractional slot compatibility multiplier (supporting partial credit and slot substitution penalty).
+pub fn compute_slot_multiplier(gt: &str, ma: &str) -> f32 {
     let gt_lower = gt.to_lowercase();
     let ma_lower = ma.to_lowercase();
 
     for domain in KNOWN_SLOT_DOMAINS {
-        let gt_has_slot = domain.iter().any(|&val| gt_lower.contains(val));
-        if gt_has_slot {
-            let ma_matching = domain.iter().any(|&val| gt_lower.contains(val) && ma_lower.contains(val));
-            let ma_different = domain.iter().any(|&val| !gt_lower.contains(val) && ma_lower.contains(val));
-            if !ma_matching && ma_different {
-                return true;
+        let gt_slot_items: Vec<&str> = domain.iter().copied().filter(|&val| gt_lower.contains(val)).collect();
+        if !gt_slot_items.is_empty() {
+            let matched_count = gt_slot_items.iter().filter(|&&val| ma_lower.contains(val)).count();
+            let novel_count = domain.iter().filter(|&&val| !gt_lower.contains(val) && ma_lower.contains(val)).count();
+
+            if novel_count > 0 && matched_count == 0 {
+                return 0.05; // Complete slot substitution distractor (e.g. heart -> liver, yen -> euro)
+            } else if novel_count > 0 {
+                return 0.25; // Substituted part of a multi-item list (e.g. red, yellow, blue instead of RGB)
+            } else if matched_count < gt_slot_items.len() && matched_count > 0 {
+                // Partial credit for multi-item list (e.g. 2 of 3 colors provided)
+                let fraction = (matched_count as f32) / (gt_slot_items.len() as f32);
+                return 0.70 + 0.30 * fraction;
             }
         }
     }
-    false
+    1.0
 }
 
 const PREDICATE_PAIRS: &[(&str, &str)] = &[
@@ -224,68 +330,6 @@ pub fn check_predicate_conflict(gt: &str, ma: &str) -> bool {
     for &(p1, p2) in PREDICATE_PAIRS {
         if (gt_lower.contains(p1) && ma_lower.contains(p2)) || (gt_lower.contains(p2) && ma_lower.contains(p1)) {
             return true;
-        }
-    }
-    false
-}
-
-/// Helper struct for parsed physical quantities.
-struct Quantity {
-    num: f32,
-    unit_code: u8, // 1: km/s, 2: m/s, 3: celsius, 4: fahrenheit, 5: days, 6: percent
-}
-
-fn parse_first_quantity(text: &str) -> Option<Quantity> {
-    let lower = text.to_lowercase();
-    let nums = extract_numbers(&lower);
-    if nums.is_empty() {
-        return None;
-    }
-
-    let mut num = parse_f32(&nums[0]).ok()?;
-    if lower.contains("million") {
-        num *= 1_000_000.0;
-    }
-
-    let mut unit_code = 0u8;
-    if lower.contains("km/s") || lower.contains("kilometers per second") || lower.contains("km per second") {
-        unit_code = 1;
-    } else if lower.contains("m/s") || lower.contains("meters per second") || lower.contains("m per second") {
-        unit_code = 2;
-    } else if lower.contains("celsius") || lower.contains("°c") {
-        unit_code = 3;
-    } else if lower.contains("fahrenheit") || lower.contains("°f") {
-        unit_code = 4;
-    } else if lower.contains("days") || lower.contains("day") {
-        unit_code = 5;
-    } else if lower.contains("percent") || lower.contains("%") {
-        unit_code = 6;
-    }
-
-    Some(Quantity { num, unit_code })
-}
-
-/// Check if candidate introduces a conflicting quantity or incompatible measurement unit.
-pub fn check_quantity_conflict(gt: &str, ma: &str) -> bool {
-    if let (Some(q_gt), Some(q_ma)) = (parse_first_quantity(gt), parse_first_quantity(ma)) {
-        let val_gt = q_gt.num;
-        let mut val_ma = q_ma.num;
-
-        // Convert between scale units (e.g. km/s <-> m/s)
-        if q_gt.unit_code == 1 && q_ma.unit_code == 2 {
-            val_ma /= 1000.0; // 300,000 m/s = 300 km/s != 300,000 km/s
-        } else if q_gt.unit_code == 2 && q_ma.unit_code == 1 {
-            val_ma *= 1000.0;
-        } else if q_gt.unit_code != 0 && q_ma.unit_code != 0 && q_gt.unit_code != q_ma.unit_code {
-            // Unit mismatch across incompatible dimensions
-            return true;
-        }
-
-        if val_gt > 0.0 && val_ma > 0.0 {
-            let ratio = val_ma / val_gt;
-            if ratio < 0.95 || ratio > 1.05 {
-                return true;
-            }
         }
     }
     false

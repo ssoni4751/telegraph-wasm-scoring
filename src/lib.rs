@@ -115,14 +115,13 @@ unsafe fn signals_from_vecs(
     let raw_corr = math::cosine(gt_vec, ma_vec);
     
     // Continuous contradiction and evidence modifiers
-    let mod_pol   = if bm25::has_polarity_conflict(ground_truth, miner_answer) { 0.15 } else { 1.0 };
-    let mod_num   = if bm25::check_numeric_conflict(ground_truth, miner_answer) { 0.20 } else { 1.0 };
-    let mod_slot  = if bm25::check_slot_value_conflict(ground_truth, miner_answer) { 0.20 } else { 1.0 };
-    let mod_rel   = if bm25::check_predicate_conflict(ground_truth, miner_answer) { 0.15 } else { 1.0 };
-    let mod_quant = if bm25::check_quantity_conflict(ground_truth, miner_answer) { 0.20 } else { 1.0 };
-    let mod_ent   = if bm25::check_entity_conflict(ground_truth, miner_answer) && raw_corr < 0.92 { 0.20 } else { 1.0 };
+    let mod_pol   = if bm25::has_polarity_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
+    let mod_quant = if bm25::check_quantity_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
+    let mod_slot  = bm25::compute_slot_multiplier(ground_truth, miner_answer);
+    let mod_rel   = if bm25::check_predicate_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
+    let mod_ent   = if bm25::check_entity_conflict(ground_truth, miner_answer) && raw_corr < 0.92 { 0.05 } else { 1.0 };
 
-    let correctness = math::clamp01(raw_corr * mod_pol * mod_num * mod_slot * mod_rel * mod_quant * mod_ent);
+    let correctness = math::clamp01(raw_corr * mod_pol * mod_quant * mod_slot * mod_rel * mod_ent);
     let raw_lex     = bm25::score(ground_truth, miner_answer);
     let lexical     = math::clamp01(if raw_lex < correctness { raw_lex } else { correctness });
     let len_quality = math::length_similarity(miner_answer.len() as f32, ground_truth.len() as f32);
@@ -138,12 +137,11 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
     }
     
     // Continuous unified evidence fusion with sqrt(correctness) auxiliary modulation
-    let aux = 0.15 * relevance + 0.05 * lexical + 0.10 * len_quality;
-    let sqrt_corr = libm::sqrtf(math::clamp01(correctness));
-    let z = math::clamp01(0.70 * correctness + aux * sqrt_corr);
+    let aux = (0.15 * relevance + 0.05 * lexical + 0.10 * len_quality) * libm::sqrtf(math::clamp01(correctness));
+    let z = math::clamp01(0.70 * correctness + aux);
 
-    // Calibrated sigmoid curve (k=18.0, c0=0.52) + 2% linear gradient retention
-    let sig = 1.0 / (1.0 + libm::expf(-18.0 * (z - 0.52)));
+    // Monotonic calibrated sigmoid curve (k=15.0, c0=0.51) + 2% linear gradient retention
+    let sig = 1.0 / (1.0 + libm::expf(-15.0 * (z - 0.51)));
     let score = 0.98 * sig + 0.02 * z;
     math::clamp01(score)
 }
