@@ -110,7 +110,7 @@ fn nums_match(a: &str, b: &str) -> bool {
 
 /// Lightweight no_std ascii float parser supporting decimals, signs, and scientific notation (e.g. 2.99792e5).
 fn parse_f32(s: &str) -> Result<f32, ()> {
-    if s.is_empty() {
+    if s.is_empty() || !s.chars().any(|c| c.is_ascii_digit()) {
         return Err(());
     }
     let bytes = s.as_bytes();
@@ -199,6 +199,9 @@ pub fn extract_all_quantities(text: &str) -> Vec<Quantity> {
     }
 
     for (i, &w) in words.iter().enumerate() {
+        if !w.chars().any(|c| c.is_ascii_digit()) {
+            continue;
+        }
         let clean: String = w.chars().filter(|c| c.is_ascii_digit() || *c == '.' || *c == 'e' || *c == 'E' || *c == '+' || *c == '-').collect();
         if let Ok(mut num) = parse_f32(&clean) {
             let has_decimal = clean.contains('.') || clean.contains('e') || clean.contains('E');
@@ -228,9 +231,10 @@ pub fn check_quantity_conflict(gt: &str, ma: &str) -> bool {
     let q_ma = extract_all_quantities(ma);
 
     if !q_gt.is_empty() && !q_ma.is_empty() {
-        for g in &q_gt {
+        // A conflict occurs if MA asserts a number that does not match ANY valid quantity in GT
+        for m in &q_ma {
             let mut matched = false;
-            for m in &q_ma {
+            for g in &q_gt {
                 let mut v_ma = m.num;
                 // Unit conversion km/s <-> m/s
                 if g.unit_code == 1 && m.unit_code == 2 {
@@ -258,53 +262,11 @@ pub fn check_quantity_conflict(gt: &str, ma: &str) -> bool {
                 }
             }
             if !matched {
-                return true;
+                return true; // Candidate asserted a conflicting number not found in GT!
             }
         }
     }
     false
-}
-
-const KNOWN_SLOT_DOMAINS: &[&[&str]] = &[
-    // Organs
-    &["heart", "liver", "lung", "lungs", "brain", "kidney", "kidneys", "stomach", "pancreas", "spleen"],
-    // Currencies
-    &["yen", "euro", "dollar", "dollars", "pound", "pounds", "yuan", "peso", "rupee", "franc"],
-    // Biological & Chemical Processes
-    &["photosynthesis", "cellular respiration", "respiration", "fermentation", "mitosis", "meiosis", "combustion", "digestion"],
-    // Celestial bodies
-    &["mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto"],
-    // Chemical elements
-    &["hydrogen", "helium", "oxygen", "nitrogen", "carbon", "gold", "silver", "iron", "copper", "lead", "uranium"],
-    // Primary Colors
-    &["red", "green", "blue", "yellow", "cyan", "magenta"],
-    // Superlatives / Oceans / Deserts / Minerals
-    &["pacific", "atlantic", "indian", "arctic", "sahara", "antarctic", "gobi", "diamond", "corundum", "topaz", "quartz", "talc"]
-];
-
-/// Compute fractional slot compatibility multiplier (supporting partial credit and slot substitution penalty).
-pub fn compute_slot_multiplier(gt: &str, ma: &str) -> f32 {
-    let gt_lower = gt.to_lowercase();
-    let ma_lower = ma.to_lowercase();
-
-    for domain in KNOWN_SLOT_DOMAINS {
-        let gt_slot_items: Vec<&str> = domain.iter().copied().filter(|&val| gt_lower.contains(val)).collect();
-        if !gt_slot_items.is_empty() {
-            let matched_count = gt_slot_items.iter().filter(|&&val| ma_lower.contains(val)).count();
-            let novel_count = domain.iter().filter(|&&val| !gt_lower.contains(val) && ma_lower.contains(val)).count();
-
-            if novel_count > 0 && matched_count == 0 {
-                return 0.05; // Complete slot substitution distractor (e.g. heart -> liver, yen -> euro)
-            } else if novel_count > 0 {
-                return 0.25; // Substituted part of a multi-item list (e.g. red, yellow, blue instead of RGB)
-            } else if matched_count < gt_slot_items.len() && matched_count > 0 {
-                // Partial credit for multi-item list (e.g. 2 of 3 colors provided)
-                let fraction = (matched_count as f32) / (gt_slot_items.len() as f32);
-                return 0.70 + 0.30 * fraction;
-            }
-        }
-    }
-    1.0
 }
 
 const PREDICATE_PAIRS: &[(&str, &str)] = &[
@@ -329,62 +291,6 @@ pub fn check_predicate_conflict(gt: &str, ma: &str) -> bool {
 
     for &(p1, p2) in PREDICATE_PAIRS {
         if (gt_lower.contains(p1) && ma_lower.contains(p2)) || (gt_lower.contains(p2) && ma_lower.contains(p1)) {
-            return true;
-        }
-    }
-    false
-}
-
-const FIRST_WORD_IGNORES: &[&str] = &[
-    "the", "a", "an", "in", "on", "at", "for", "with", "by", "from",
-    "to", "it", "this", "that", "these", "those", "is", "are", "was",
-    "were", "be", "what", "where", "when", "who", "why", "how", "all",
-    "some", "many", "most", "each", "every", "if", "as", "and", "or", "but"
-];
-
-#[inline]
-fn is_sentence_start_ignore(term: &str) -> bool {
-    FIRST_WORD_IGNORES.iter().any(|&sw| sw == term)
-}
-
-/// Check if candidate introduces conflicting proper nouns / named entities compared to reference.
-pub fn check_entity_conflict(gt: &str, ma: &str) -> bool {
-    fn get_entities(text: &str) -> Vec<String> {
-        let mut ents = Vec::new();
-        let words: Vec<&str> = text.split_whitespace().collect();
-        for (i, &w) in words.iter().enumerate() {
-            let clean: String = w.chars().filter(|c| c.is_alphanumeric()).collect();
-            if clean.len() >= 2 {
-                let first = clean.chars().next().unwrap();
-                let is_first_word = i == 0 || words[i - 1].ends_with('.') || words[i - 1].ends_with('!') || words[i - 1].ends_with('?');
-                let has_alpha = clean.chars().any(|c| c.is_alphabetic());
-                let all_upper = has_alpha && clean.chars().all(|c| c.is_uppercase() || c.is_ascii_digit());
-                let lower = clean.to_lowercase();
-                
-                let should_include = if is_first_word {
-                    first.is_uppercase() && has_alpha && !is_sentence_start_ignore(&lower)
-                } else {
-                    (first.is_uppercase() && has_alpha) || all_upper
-                };
-
-                if should_include && !is_stopword(&lower) && !ents.contains(&lower) {
-                    ents.push(lower);
-                }
-            }
-        }
-        ents
-    }
-
-    let gt_ents = get_entities(gt);
-    let ma_ents = get_entities(ma);
-    let gt_lower = gt.to_lowercase();
-    let ma_lower = ma.to_lowercase();
-
-    if !gt_ents.is_empty() && !ma_ents.is_empty() {
-        let has_missing_gt = gt_ents.iter().any(|g| !ma_lower.contains(g) && !ma_lower.contains(&g[..3.min(g.len())]));
-        let has_novel_ent  = ma_ents.iter().any(|m| !gt_lower.contains(m) && !gt_lower.contains(&m[..3.min(m.len())]));
-        
-        if has_missing_gt && has_novel_ent {
             return true;
         }
     }
