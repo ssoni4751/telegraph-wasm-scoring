@@ -104,48 +104,27 @@ unsafe fn signals_from_vecs(
     miner_answer: &str,
     ma_vec: &[f32],
 ) -> (f32, f32, f32, f32) {
-    // Relative question alignment: measures MA's answer relevance relative to the reference GT
     let q_gt_sim = math::cosine(q_vec, gt_vec);
     let q_ma_sim = math::cosine(q_vec, ma_vec);
     let relevance = if q_gt_sim > 0.01 {
-        libm::powf(math::clamp01(q_ma_sim / q_gt_sim), 2.0)
+        math::clamp01(q_ma_sim / q_gt_sim)
     } else {
         math::clamp01(q_ma_sim)
     };
 
-    let cos_val = math::cosine(gt_vec, ma_vec);
+    let raw_corr = math::cosine(gt_vec, ma_vec);
     
-    // Exact match bypass (1.0000 invariant)
-    if cos_val >= 0.999 {
-        return (relevance, 1.0, 1.0, 1.0);
-    }
+    // Continuous contradiction and evidence modifiers
+    let mod_pol   = if bm25::has_polarity_conflict(ground_truth, miner_answer) { 0.15 } else { 1.0 };
+    let mod_num   = if bm25::check_numeric_conflict(ground_truth, miner_answer) { 0.20 } else { 1.0 };
+    let mod_slot  = if bm25::check_slot_value_conflict(ground_truth, miner_answer) { 0.20 } else { 1.0 };
+    let mod_rel   = if bm25::check_predicate_conflict(ground_truth, miner_answer) { 0.15 } else { 1.0 };
+    let mod_quant = if bm25::check_quantity_conflict(ground_truth, miner_answer) { 0.20 } else { 1.0 };
+    let mod_ent   = if bm25::check_entity_conflict(ground_truth, miner_answer) && raw_corr < 0.92 { 0.20 } else { 1.0 };
 
-    // Boost semantic similarity using question alignment
-    let effective_sim = math::clamp01(cos_val + 0.04 * relevance);
-
-    // High-Separation Sigmoid Decision Boundary (x0=0.67, k=26.0) to achieve 0.92+ average separation margin
-    let mut raw_correctness = math::sigmoid_contrast(effective_sim, 0.67, 26.0);
-
-    // Strict penalization for direct negation contradictions
-    let polarity_match = bm25::has_negation(ground_truth) == bm25::has_negation(miner_answer);
-    if !polarity_match {
-        raw_correctness *= 0.01;
-    }
-
-    // Strict penalization for numeric contradictions
-    let num_conflict = bm25::check_numeric_conflict(ground_truth, miner_answer);
-    if num_conflict {
-        raw_correctness *= 0.01;
-    }
-
-    // Strict penalization for proper noun / entity contradictions on distractors
-    let ent_conflict = bm25::check_entity_conflict(ground_truth, miner_answer);
-    if ent_conflict && cos_val < 0.88 {
-        raw_correctness *= 0.01;
-    }
-
-    let correctness = math::clamp01(raw_correctness);
-    let lexical     = bm25::score(ground_truth, miner_answer);
+    let correctness = math::clamp01(raw_corr * mod_pol * mod_num * mod_slot * mod_rel * mod_quant * mod_ent);
+    let raw_lex     = bm25::score(ground_truth, miner_answer);
+    let lexical     = math::clamp01(if raw_lex < correctness { raw_lex } else { correctness });
     let len_quality = math::length_similarity(miner_answer.len() as f32, ground_truth.len() as f32);
 
     (relevance, correctness, lexical, len_quality)
@@ -153,14 +132,19 @@ unsafe fn signals_from_vecs(
 
 #[inline]
 fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -> f32 {
-    // Exact self-match must strictly return 1.0000 regardless of question alignment
-    if correctness >= 0.999 {
+    // Exact match hard invariance
+    if correctness >= 0.999 && relevance >= 0.90 {
         return 1.0;
     }
-    // High-margin power gating: drives sub-threshold distractors from ~0.15 to ~0.01 while keeping 0.96+ at ~0.95
-    let gated = libm::powf(correctness, 2.5);
-    let aux = 0.88 + 0.08 * relevance + 0.02 * lexical + 0.02 * len_quality;
-    let score = gated * aux;
+    
+    // Continuous unified evidence fusion with sqrt(correctness) auxiliary modulation
+    let aux = 0.15 * relevance + 0.05 * lexical + 0.10 * len_quality;
+    let sqrt_corr = libm::sqrtf(math::clamp01(correctness));
+    let z = math::clamp01(0.70 * correctness + aux * sqrt_corr);
+
+    // Calibrated sigmoid curve (k=18.0, c0=0.52) + 2% linear gradient retention
+    let sig = 1.0 / (1.0 + libm::expf(-18.0 * (z - 0.52)));
+    let score = 0.98 * sig + 0.02 * z;
     math::clamp01(score)
 }
 
