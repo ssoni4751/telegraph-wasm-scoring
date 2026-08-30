@@ -139,9 +139,9 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
         return 1.0;
     }
     
-    // Proven V2.1 high-contrast power curve
-    let gated = libm::powf(correctness, 2.5);
-    let aux = 0.88 + 0.08 * relevance + 0.02 * lexical + 0.02 * len_quality;
+    // V4.4 High-Contrast Power Curve (c^3.0 with dynamic auxiliary modulation)
+    let gated = libm::powf(correctness, 3.0);
+    let aux = 0.85 + 0.10 * relevance + 0.03 * lexical + 0.02 * len_quality;
     let score = gated * aux;
     math::clamp01(score)
 }
