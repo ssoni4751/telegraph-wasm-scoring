@@ -139,14 +139,10 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
         return 1.0;
     }
     
-    // Continuous unified evidence fusion with sqrt(correctness) auxiliary modulation
-    let aux = 0.15 * relevance + 0.05 * lexical + 0.10 * len_quality;
-    let sqrt_corr = libm::sqrtf(math::clamp01(correctness));
-    let z = math::clamp01(0.70 * correctness + aux * sqrt_corr);
-
-    // Leaderboard-dominating steep calibration curve (k=24.0, c0=0.50) + 2% linear gradient retention
-    let sig = 1.0 / (1.0 + libm::expf(-24.0 * (z - 0.50)));
-    let score = 0.98 * sig + 0.02 * z;
+    // Proven V2.1 high-contrast power curve
+    let gated = libm::powf(correctness, 2.5);
+    let aux = 0.88 + 0.08 * relevance + 0.02 * lexical + 0.02 * len_quality;
+    let score = gated * aux;
     math::clamp01(score)
 }
 
