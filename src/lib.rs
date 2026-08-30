@@ -97,6 +97,7 @@ unsafe fn compute_signals(question: &str, ground_truth: &str, miner_answer: &str
 /// `ground_truth` text is still needed here for BM25, which is lexical
 /// (word-overlap based), not embedding-based — there's no vector to reuse for it.
 #[inline]
+#[inline]
 unsafe fn signals_from_vecs(
     q_vec: &[f32],
     gt_vec: &[f32],
@@ -104,6 +105,10 @@ unsafe fn signals_from_vecs(
     miner_answer: &str,
     ma_vec: &[f32],
 ) -> (f32, f32, f32, f32) {
+    if ground_truth.trim().eq_ignore_ascii_case(miner_answer.trim()) {
+        return (1.0, 1.0, 1.0, 1.0);
+    }
+
     let q_gt_sim = math::cosine(q_vec, gt_vec);
     let q_ma_sim = math::cosine(q_vec, ma_vec);
     let relevance = if q_gt_sim > 0.01 {
@@ -130,7 +135,7 @@ unsafe fn signals_from_vecs(
 #[inline]
 fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -> f32 {
     // Exact match hard invariance
-    if correctness >= 0.999 && relevance >= 0.90 {
+    if correctness >= 0.995 {
         return 1.0;
     }
     
@@ -168,6 +173,10 @@ pub unsafe extern "C" fn rank_answer(
     // Empty / whitespace-only answer → immediate 0
     if miner_answer.trim().is_empty() {
         return 0.0;
+    }
+
+    if ground_truth.trim().eq_ignore_ascii_case(miner_answer.trim()) {
+        return 1.0;
     }
 
     let (relevance, correctness, lexical, len_quality) =
@@ -212,6 +221,10 @@ pub unsafe extern "C" fn rank_answer_cached(
 
     if miner_answer.trim().is_empty() {
         return 0.0;
+    }
+
+    if ground_truth.trim().eq_ignore_ascii_case(miner_answer.trim()) {
+        return 1.0;
     }
 
     let q_vec = read_f32s(q_vec_ptr, EMBED_DIM as i32);

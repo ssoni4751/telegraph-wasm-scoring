@@ -94,7 +94,9 @@ pub fn has_polarity_conflict(gt: &str, ma: &str) -> bool {
         let ma_has_w1 = ma_terms.iter().any(|t| t == w1);
         let ma_has_w2 = ma_terms.iter().any(|t| t == w2);
 
-        if (gt_has_w1 && ma_has_w2) || (gt_has_w2 && ma_has_w1) {
+        // A conflict occurs ONLY if GT asserts w1 (and not w2), while MA inverts it to w2 (and not w1)
+        if (gt_has_w1 && !gt_has_w2 && ma_has_w2 && !ma_has_w1) || 
+           (gt_has_w2 && !gt_has_w1 && ma_has_w1 && !ma_has_w2) {
             return true;
         }
     }
@@ -134,6 +136,9 @@ pub fn extract_all_years(text: &str) -> Vec<YearInfo> {
 
 /// Check if candidate asserts an explicit historical year that conflicts with reference.
 pub fn check_temporal_year_conflict(gt: &str, ma: &str) -> bool {
+    if gt.trim().eq_ignore_ascii_case(ma.trim()) {
+        return false;
+    }
     let gt_years = extract_all_years(gt);
     let ma_years = extract_all_years(ma);
 
@@ -345,11 +350,20 @@ const PREDICATE_PAIRS: &[(&str, &str)] = &[
 
 /// Check if candidate substitutes a key action or relationship predicate with a conflicting predicate.
 pub fn check_predicate_conflict(gt: &str, ma: &str) -> bool {
+    if gt.trim().eq_ignore_ascii_case(ma.trim()) {
+        return false;
+    }
     let gt_lower = gt.to_lowercase();
     let ma_lower = ma.to_lowercase();
 
     for &(p1, p2) in PREDICATE_PAIRS {
-        if (gt_lower.contains(p1) && ma_lower.contains(p2)) || (gt_lower.contains(p2) && ma_lower.contains(p1)) {
+        let gt_has_p1 = gt_lower.contains(p1);
+        let gt_has_p2 = gt_lower.contains(p2);
+        let ma_has_p1 = ma_lower.contains(p1);
+        let ma_has_p2 = ma_lower.contains(p2);
+
+        if (gt_has_p1 && !gt_has_p2 && ma_has_p2 && !ma_has_p1) || 
+           (gt_has_p2 && !gt_has_p1 && ma_has_p1 && !ma_has_p2) {
             return true;
         }
     }

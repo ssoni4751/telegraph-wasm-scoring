@@ -210,11 +210,13 @@ fn run_transformer(encoding: &Encoding) -> [f32; EMBED_DIM] {
     for i in 0..real_len {
         let id = encoding.input_ids[i];
         let mut row = alloc::vec![0f32; hidden_size];
-        let w_row = &word_emb[(id as usize % vocab_size) * hidden_size..][..hidden_size];
-        let p_row = &pos_emb[(i % num_positions) * hidden_size..][..hidden_size];
-        let t_row = &type_emb[0..hidden_size]; // always token_type 0
+        let w_row = &word_emb.data[(id as usize % vocab_size) * hidden_size..][..hidden_size];
+        let p_row = &pos_emb.data[(i % num_positions) * hidden_size..][..hidden_size];
+        let t_row = &type_emb.data[0..hidden_size]; // always token_type 0
         for d in 0..hidden_size {
-            row[d] = w_row[d] + p_row[d] + t_row[d];
+            row[d] = (w_row[d] as i8 as f32) * word_emb.scale
+                   + (p_row[d] as i8 as f32) * pos_emb.scale
+                   + (t_row[d] as i8 as f32) * type_emb.scale;
         }
         layer_norm(&mut row, &emb_ln_gamma, &emb_ln_beta);
         hidden.push(row);
@@ -267,21 +269,27 @@ fn read_f32_vec(w: &[u8], c: &mut usize, n: usize) -> Vec<f32> {
     v
 }
 
-/// Read an INT8-quantized embedding table: [scale f32][rows × cols i8 bytes].
-/// Returns dequantized f32, row-major [rows][cols], flattened.
 #[cfg(feature = "real_weights")]
-fn read_qtable(w: &[u8], c: &mut usize, rows: usize, cols: usize) -> Vec<f32> {
+struct QMat<'a> {
+    scale: f32,
+    data: &'a [u8],
+}
+
+/// Read an INT8-quantized embedding table: [scale f32][rows × cols i8 bytes].
+/// Returns zero-copy QMat borrow into static weights.
+#[cfg(feature = "real_weights")]
+fn read_qtable<'a>(w: &'a [u8], c: &mut usize, rows: usize, cols: usize) -> QMat<'a> {
     let scale = read_f32(w, c);
     let n = rows * cols;
-    let mat: Vec<f32> = w[*c..*c + n].iter().map(|&b| (b as i8) as f32 * scale).collect();
+    let data = &w[*c..*c + n];
     *c += n;
-    mat
+    QMat { scale, data }
 }
 
 /// Read INT8 linear weight block: [scale f32][out_dim × in_dim i8 bytes],
-/// row-major [out_dim][in_dim] — matches `matmul_row`'s indexing.
+/// row-major [out_dim][in_dim] — matches `matmul_row_bias`'s indexing.
 #[cfg(feature = "real_weights")]
-fn read_linear(w: &[u8], c: &mut usize, in_dim: usize, out_dim: usize) -> Vec<f32> {
+fn read_linear<'a>(w: &'a [u8], c: &mut usize, in_dim: usize, out_dim: usize) -> QMat<'a> {
     read_qtable(w, c, out_dim, in_dim)
 }
 
@@ -299,7 +307,7 @@ fn transformer_layer(
 ) -> Vec<Vec<f32>> {
     let seq_len = hidden.len();
 
-    // ── Load this layer's weights ─────────────────────────────────────────────
+    // ── Load this layer's weights (zero-allocation QMat borrows) ──────────────
     let q_w = read_linear(w, c, hidden_size, hidden_size);
     let q_b = read_f32_vec(w, c, hidden_size);
     let k_w = read_linear(w, c, hidden_size, hidden_size);
@@ -335,10 +343,6 @@ fn transformer_layer(
             let q_head = &q[i][hs..he];
 
             // Attention scores for head h, position i, against all positions j.
-            // Padding positions (attention_mask == 0) are masked out with -inf
-            // so softmax assigns them ~0 weight — otherwise padding tokens
-            // (which are real, if meaningless, KV vectors) would dilute the
-            // real tokens' attention distribution.
             let mut scores: Vec<f32> = (0..seq_len)
                 .map(|j| {
                     if attention_mask[j] == 0 {
@@ -398,11 +402,19 @@ fn transformer_layer(
 }
 
 #[cfg(feature = "real_weights")]
-fn matmul_row_bias(input: &[f32], weights: &[f32], bias: &[f32], out_dim: usize) -> Vec<f32> {
+fn matmul_row_bias(input: &[f32], qmat: &QMat, bias: &[f32], out_dim: usize) -> Vec<f32> {
     let in_dim = input.len();
-    (0..out_dim)
-        .map(|o| crate::math::dot(input, &weights[o * in_dim..(o + 1) * in_dim]) + bias[o])
-        .collect()
+    let scale = qmat.scale;
+    let mut out = alloc::vec![0f32; out_dim];
+    for o in 0..out_dim {
+        let row = &qmat.data[o * in_dim..(o + 1) * in_dim];
+        let mut dot = 0.0f32;
+        for i in 0..in_dim {
+            dot += input[i] * (row[i] as i8 as f32);
+        }
+        out[o] = dot * scale + bias[o];
+    }
+    out
 }
 
 /// In-place LayerNorm over a single row: normalise to zero-mean/unit-variance,
