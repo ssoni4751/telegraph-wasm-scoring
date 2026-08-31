@@ -145,8 +145,8 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
     let sqrt_corr = libm::sqrtf(math::clamp01(correctness));
     let z = math::clamp01(0.70 * correctness + aux * sqrt_corr);
 
-    // Leaderboard-dominating calibrated curve (k=18.0, c0=0.66) + 2% linear gradient retention
-    let sig = 1.0 / (1.0 + libm::expf(-18.0 * (z - 0.66)));
+    // Champion-matching high-ceiling sigmoid curve (k=24.0, c0=0.50) + 2% linear gradient retention
+    let sig = 1.0 / (1.0 + libm::expf(-24.0 * (z - 0.50)));
     let score = 0.98 * sig + 0.02 * z;
     math::clamp01(score)
 }
