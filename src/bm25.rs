@@ -152,6 +152,66 @@ pub fn check_temporal_year_conflict(gt: &str, ma: &str) -> bool {
     false
 }
 
+const FIRST_WORD_IGNORES: &[&str] = &[
+    "the", "a", "an", "in", "on", "at", "for", "with", "by", "from",
+    "to", "it", "this", "that", "these", "those", "is", "are", "was",
+    "were", "be", "what", "where", "when", "who", "why", "how", "all",
+    "some", "many", "most", "each", "every", "if", "as", "and", "or", "but"
+];
+
+#[inline]
+fn is_sentence_start_ignore(term: &str) -> bool {
+    FIRST_WORD_IGNORES.iter().any(|&sw| sw == term)
+}
+
+/// Check if candidate introduces conflicting proper nouns / named entities compared to reference.
+pub fn check_entity_conflict(gt: &str, ma: &str) -> bool {
+    if gt.trim().eq_ignore_ascii_case(ma.trim()) {
+        return false;
+    }
+
+    fn get_entities(text: &str) -> Vec<String> {
+        let mut ents = Vec::new();
+        let words: Vec<&str> = text.split_whitespace().collect();
+        for (i, &w) in words.iter().enumerate() {
+            let clean: String = w.chars().filter(|c| c.is_alphanumeric()).collect();
+            if clean.len() >= 2 {
+                let first = clean.chars().next().unwrap();
+                let is_first_word = i == 0 || words[i - 1].ends_with('.') || words[i - 1].ends_with('!') || words[i - 1].ends_with('?');
+                let has_alpha = clean.chars().any(|c| c.is_alphabetic());
+                let all_upper = has_alpha && clean.chars().all(|c| c.is_uppercase() || c.is_ascii_digit());
+                let lower = clean.to_lowercase();
+                
+                let should_include = if is_first_word {
+                    first.is_uppercase() && has_alpha && !is_sentence_start_ignore(&lower)
+                } else {
+                    (first.is_uppercase() && has_alpha) || all_upper
+                };
+
+                if should_include && !is_stopword(&lower) && !ents.contains(&lower) {
+                    ents.push(lower);
+                }
+            }
+        }
+        ents
+    }
+
+    let gt_ents = get_entities(gt);
+    let ma_ents = get_entities(ma);
+    let gt_lower = gt.to_lowercase();
+    let ma_lower = ma.to_lowercase();
+
+    if !gt_ents.is_empty() && !ma_ents.is_empty() {
+        let has_missing_gt = gt_ents.iter().any(|g| !ma_lower.contains(g) && !ma_lower.contains(&g[..3.min(g.len())]));
+        let has_novel_ent  = ma_ents.iter().any(|m| !gt_lower.contains(m) && !gt_lower.contains(&m[..3.min(m.len())]));
+        
+        if has_missing_gt && has_novel_ent {
+            return true;
+        }
+    }
+    false
+}
+
 /// Check if two numeric tokens match exactly or are close approximations.
 fn nums_match(a: &str, b: &str) -> bool {
     if a == b {
