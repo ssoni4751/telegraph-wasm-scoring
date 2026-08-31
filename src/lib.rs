@@ -146,9 +146,9 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
     let sqrt_corr = libm::sqrtf(math::clamp01(correctness));
     let z = math::clamp01(0.70 * correctness + aux * sqrt_corr);
 
-    // Calibrated high-precision curve (k=25.0, c0=0.50) + 0.3% micro-gradient retention for real-traffic ranking monotonicity
-    let sig = 1.0 / (1.0 + libm::expf(-25.0 * (z - 0.50)));
-    let score = 0.997 * sig + 0.003 * z;
+    // Calibrated nano-gradient curve (k=25.4, c0=0.50) + 0.1% linear retention for real-traffic ranking monotonicity
+    let sig = 1.0 / (1.0 + libm::expf(-25.4 * (z - 0.50)));
+    let score = 0.999 * sig + 0.001 * z;
     math::clamp01(score)
 }
 
