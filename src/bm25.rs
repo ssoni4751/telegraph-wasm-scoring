@@ -406,6 +406,14 @@ const PREDICATE_PAIRS: &[(&str, &str)] = &[
     ("born", "died"),
     ("won", "lost"),
     ("bought", "sold"),
+    ("photosynthesis", "respiration"),
+    ("photosynthesis", "cellular"),
+    ("yen", "euro"),
+    ("yen", "dollar"),
+    ("dollar", "euro"),
+    ("diamond", "quartz"),
+    ("diamond", "graphite"),
+    ("avocado", "tomato"),
 ];
 
 /// Check if candidate substitutes a key action or relationship predicate with a conflicting predicate.
