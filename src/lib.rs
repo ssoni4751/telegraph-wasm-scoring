@@ -111,11 +111,12 @@ unsafe fn signals_from_vecs(
 
     let q_gt_sim = math::cosine(q_vec, gt_vec);
     let q_ma_sim = math::cosine(q_vec, ma_vec);
-    let relevance = if q_gt_sim > 0.01 {
+    let raw_rel = if q_gt_sim > 0.01 {
         math::clamp01(q_ma_sim / q_gt_sim)
     } else {
         math::clamp01(q_ma_sim)
     };
+    let relevance = math::clamp01(raw_rel * raw_rel);
 
     let raw_corr = math::cosine(gt_vec, ma_vec);
     let pow_corr = libm::powf(math::clamp01(raw_corr), 3.5);
