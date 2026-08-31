@@ -119,13 +119,14 @@ unsafe fn signals_from_vecs(
 
     let raw_corr = math::cosine(gt_vec, ma_vec);
     
-    // Robust invariant contradiction modifiers (Directional polarity, quantity, relational, temporal)
+    // Robust invariant contradiction modifiers (Directional polarity, quantity, relational, temporal, entity)
     let mod_pol   = if bm25::has_polarity_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
     let mod_quant = if bm25::check_quantity_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
     let mod_rel   = if bm25::check_predicate_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
     let mod_temp  = if bm25::check_temporal_year_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
+    let mod_ent   = if bm25::check_entity_conflict(ground_truth, miner_answer) && raw_corr < 0.88 { 0.05 } else { 1.0 };
 
-    let correctness = math::clamp01(raw_corr * mod_pol * mod_quant * mod_rel * mod_temp);
+    let correctness = math::clamp01(raw_corr * mod_pol * mod_quant * mod_rel * mod_temp * mod_ent);
     let lexical     = bm25::score(ground_truth, miner_answer);
     let len_quality = math::length_similarity(miner_answer.len() as f32, ground_truth.len() as f32);
 
@@ -139,7 +140,7 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
         return 1.0;
     }
     
-    // Proven V2.1 high-contrast power curve
+    // Proven True V2.1 high-contrast power curve
     let gated = libm::powf(correctness, 2.5);
     let aux = 0.88 + 0.08 * relevance + 0.02 * lexical + 0.02 * len_quality;
     let score = gated * aux;
