@@ -123,7 +123,7 @@ unsafe fn signals_from_vecs(
     // Robust invariant contradiction modifiers (Directional polarity, quantity, relational, temporal, entity)
     let mod_pol   = if bm25::has_polarity_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
     let mod_quant = if bm25::check_quantity_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
-    let mod_rel   = if bm25::check_predicate_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
+    let mod_rel   = if bm25::check_predicate_conflict(ground_truth, miner_answer) && raw_corr < 0.88 { 0.05 } else { 1.0 };
     let mod_temp  = if bm25::check_temporal_year_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
     let mod_ent   = if bm25::check_entity_conflict(ground_truth, miner_answer) && raw_corr < 0.88 { 0.05 } else { 1.0 };
 
@@ -146,9 +146,10 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
     let sqrt_corr = libm::sqrtf(math::clamp01(correctness));
     let z = math::clamp01(0.70 * correctness + aux * sqrt_corr);
 
-    // Pure uncompressed sigmoid curve (k=24.5, c0=0.50)
-    let sig = 1.0 / (1.0 + libm::expf(-24.5 * (z - 0.50)));
-    math::clamp01(sig)
+    // Calibrated high-precision curve (k=24.6, c0=0.50) + 1.5% linear gradient retention
+    let sig = 1.0 / (1.0 + libm::expf(-24.6 * (z - 0.50)));
+    let score = 0.985 * sig + 0.015 * z;
+    math::clamp01(score)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
