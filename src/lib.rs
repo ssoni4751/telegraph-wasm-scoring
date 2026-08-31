@@ -146,8 +146,8 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
     let sqrt_corr = libm::sqrtf(math::clamp01(correctness));
     let z = math::clamp01(0.70 * correctness + aux * sqrt_corr);
 
-    // Pure uncompressed sigmoid curve (k=24.5, c0=0.50)
-    let sig = 1.0 / (1.0 + libm::expf(-24.5 * (z - 0.50)));
+    // Pure uncompressed sigmoid curve (k=25.2, c0=0.50)
+    let sig = 1.0 / (1.0 + libm::expf(-25.2 * (z - 0.50)));
     math::clamp01(sig)
 }
 
