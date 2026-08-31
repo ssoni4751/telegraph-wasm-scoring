@@ -53,14 +53,14 @@ pub fn clamp01(v: f32) -> f32 {
 }
 
 /// Relative length quality comparing candidate length against reference length.
-/// Uses calibrated Gaussian with sigma=0.68 matching conversational QA distributions.
+/// Uses asymmetric Gaussian: penalizes verbose padding slightly more than concise answers.
 #[inline]
 pub fn length_similarity(cand_len: f32, ref_len: f32) -> f32 {
     if cand_len <= 0.0 || ref_len <= 0.0 {
         return 0.0;
     }
     let log_ratio = libm::logf(cand_len / ref_len);
-    let sigma = 0.68f32;
+    let sigma = if log_ratio > 0.0 { 0.42 } else { 0.55 };
     let quality = libm::expf(-0.5 * (log_ratio * log_ratio) / (sigma * sigma));
     clamp01(quality)
 }

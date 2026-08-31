@@ -111,12 +111,11 @@ unsafe fn signals_from_vecs(
 
     let q_gt_sim = math::cosine(q_vec, gt_vec);
     let q_ma_sim = math::cosine(q_vec, ma_vec);
-    let raw_rel = if q_gt_sim > 0.01 {
+    let relevance = if q_gt_sim > 0.01 {
         math::clamp01(q_ma_sim / q_gt_sim)
     } else {
         math::clamp01(q_ma_sim)
     };
-    let relevance = math::clamp01(raw_rel * raw_rel);
 
     let raw_corr = math::cosine(gt_vec, ma_vec);
     let pow_corr = libm::powf(math::clamp01(raw_corr), 3.5);
@@ -147,10 +146,9 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
     let sqrt_corr = libm::sqrtf(math::clamp01(correctness));
     let z = math::clamp01(0.70 * correctness + aux * sqrt_corr);
 
-    // Champion-beating high-contrast sigmoid curve (k=28.0, c0=0.48) + 2% linear gradient retention
-    let sig = 1.0 / (1.0 + libm::expf(-28.0 * (z - 0.48)));
-    let score = 0.98 * sig + 0.02 * z;
-    math::clamp01(score)
+    // Pure uncompressed sigmoid curve (k=24.5, c0=0.50)
+    let sig = 1.0 / (1.0 + libm::expf(-24.5 * (z - 0.50)));
+    math::clamp01(sig)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
