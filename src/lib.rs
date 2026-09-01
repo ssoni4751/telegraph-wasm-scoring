@@ -118,7 +118,7 @@ unsafe fn signals_from_vecs(
     };
 
     let raw_corr = math::cosine(gt_vec, ma_vec);
-    let pow_corr = libm::powf(math::clamp01(raw_corr), 3.5);
+    let pow_corr = libm::powf(math::clamp01(raw_corr), 2.5);
     
     // Robust invariant contradiction modifiers (Directional polarity, quantity, relational, temporal, entity)
     let mod_pol   = if bm25::has_polarity_conflict(ground_truth, miner_answer) { 0.05 } else { 1.0 };
@@ -146,8 +146,8 @@ fn composite(relevance: f32, correctness: f32, lexical: f32, len_quality: f32) -
     let sqrt_corr = libm::sqrtf(math::clamp01(correctness));
     let z = math::clamp01(0.70 * correctness + aux * sqrt_corr);
 
-    // Calibrated nano-gradient curve (k=25.4, c0=0.50) + 0.1% linear retention for real-traffic ranking monotonicity
-    let sig = 1.0 / (1.0 + libm::expf(-25.4 * (z - 0.50)));
+    // Ultra-separation curve (k=28.0, c0=0.50) + 0.1% nano-gradient retention for real-traffic monotonicity
+    let sig = 1.0 / (1.0 + libm::expf(-28.0 * (z - 0.50)));
     let score = 0.999 * sig + 0.001 * z;
     math::clamp01(score)
 }
